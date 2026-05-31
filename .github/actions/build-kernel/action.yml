@@ -138,10 +138,10 @@ runs:
         if [ "${{ inputs.ksu_type }}" = "KSUN" ]; then
           echo "Injecting KurisuNext..."
           if [ -n "${KSU_PRIVATE_TOKEN:-}" ]; then
-            git config --global url."https://${KSU_PRIVATE_TOKEN}@github.com/pratikkabra143/KurisuNext".insteadOf "https://github.com/pratikkabra143/KurisuNext"
-            curl -H "Authorization: token ${KSU_PRIVATE_TOKEN}" -LSs "https://raw.githubusercontent.com/pratikkabra143/KurisuNext/dev/kernel/setup.sh" | bash -s "${{ inputs.ksu_hash }}"
+            git config --global url."https://${KSU_PRIVATE_TOKEN}@github.com/kurisu143/KurisuNext".insteadOf "https://github.com/kurisu143/KurisuNext"
+            curl -H "Authorization: token ${KSU_PRIVATE_TOKEN}" -LSs "https://raw.githubusercontent.com/kurisu143/KurisuNext/dev/kernel/setup.sh" | bash -s "${{ inputs.ksu_hash }}"
           else
-            curl -LSs "https://raw.githubusercontent.com/pratikkabra143/KurisuNext/dev/kernel/setup.sh" | bash -s "${{ inputs.ksu_hash }}"
+            curl -LSs "https://raw.githubusercontent.com/kurisu143/KurisuNext/dev/kernel/setup.sh" | bash -s "${{ inputs.ksu_hash }}"
           fi
           
           cd KurisuNext/kernel
@@ -1017,7 +1017,7 @@ runs:
           KSU_SHA="${KSU_COMMIT_SHA:-unknown}"
           if [ "$KSU_SHA" != "unknown" ]; then
             if [ "${{ inputs.ksu_type }}" = "KSUN" ]; then
-              echo "| **KSUN Commit** | [\`${KSU_SHA:0:8}\`](https://github.com/pratikkabra143/KurisuNext/commit/$KSU_SHA) |"
+              echo "| **KSUN Commit** | [\`${KSU_SHA:0:8}\`](https://github.com/kurisu143/KurisuNext/commit/$KSU_SHA) |"
             else
               echo "| **KSU Commit** | [\`${KSU_SHA:0:8}\`](https://github.com/tiann/KernelSU/commit/$KSU_SHA) |"
             fi
