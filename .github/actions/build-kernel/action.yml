@@ -222,13 +222,9 @@ runs:
         cd "$GKI_ROOT"
 
         # Apply KSU integration patch based on version
-        # Handle KernelSU Makefile -> Kbuild compatibility safely
         KSU_DIR="KernelSU"
         if [ "${{ inputs.ksu_type }}" = "KSUN" ]; then KSU_DIR="KurisuNext"; fi
-        
-        if [ -f "common/$KSU_DIR/kernel/Kbuild" ]; then
-          sed -i 's|kernel/Makefile|kernel/Kbuild|g' "$SUSFS_DIR/kernel_patches/KernelSU/10_enable_susfs_for_ksu.patch" || true
-        fi
+
         
         case "$susfs_version" in
           "v1.5.8")
@@ -527,15 +523,22 @@ runs:
         # Add SUSFS configs (v2.0.0+ only)
         {
           echo "CONFIG_KSU_SUSFS=y"
+          echo "CONFIG_KSU_SUSFS_HAS_MAGIC_MOUNT=y"
           echo "CONFIG_KSU_SUSFS_SUS_PATH=y"
           echo "CONFIG_KSU_SUSFS_SUS_MOUNT=y"
+          echo "CONFIG_KSU_SUSFS_AUTO_ADD_SUS_KSU_DEFAULT_MOUNT=y"
+          echo "CONFIG_KSU_SUSFS_AUTO_ADD_SUS_BIND_MOUNT=y"
           echo "CONFIG_KSU_SUSFS_SUS_KSTAT=y"
+          echo "CONFIG_KSU_SUSFS_SUS_OVERLAYFS=n"
+          echo "CONFIG_KSU_SUSFS_TRY_UMOUNT=y"
+          echo "CONFIG_KSU_SUSFS_AUTO_ADD_TRY_UMOUNT_FOR_BIND_MOUNT=y"
           echo "CONFIG_KSU_SUSFS_SPOOF_UNAME=y"
           echo "CONFIG_KSU_SUSFS_ENABLE_LOG=y"
           echo "CONFIG_KSU_SUSFS_HIDE_KSU_SUSFS_SYMBOLS=y"
           echo "CONFIG_KSU_SUSFS_SPOOF_CMDLINE_OR_BOOTCONFIG=y"
           echo "CONFIG_KSU_SUSFS_OPEN_REDIRECT=y"
           echo "CONFIG_KSU_SUSFS_SUS_MAP=y"
+          echo "CONFIG_KSU_SUSFS_SUS_SU=n"
         } >> "$FRAGMENT_FILE"
 
     - name: Apply Other Patches
@@ -887,6 +890,10 @@ runs:
         CONFIG_NETFILTER_XT_TARGET_LOG=y
         CONFIG_NETFILTER_XT_MATCH_RECENT=y
         EOF
+        
+        if [ "$ANDROID_VER" = "android15" ] && [ "$VERSION_MAJOR" = "6.6" ]; then
+          echo "# CONFIG_ANDROID_PARANOID_NETWORK is not set" >> "$FRAGMENT_FILE"
+        fi
         echo "✅ Droidspaces patch applied"
         echo "::endgroup::"
 
@@ -951,6 +958,52 @@ runs:
         CONFIG_FRAME_WARN=0
         CONFIG_TRACEPOINTS=y
         EOF
+        
+        if [ "$ANDROID_VER" = "android13" ] && [ "$VERSION_MAJOR" = "5.15" ] && [ "${SUBLEVEL:-999}" -ge 74 ] && [ "${SUBLEVEL:-999}" -le 137 ]; then
+          echo "CONFIG_KALLSYMS=y" >> "$FRAGMENT_FILE"
+          echo "CONFIG_KALLSYMS_ALL=y" >> "$FRAGMENT_FILE"
+          KALLSYMS_C="kernel/kallsyms.c"
+          if [ -f "$KALLSYMS_C" ] && grep -qF 'int kallsyms_on_each_symbol' "$KALLSYMS_C" && grep -qF '#endif /* CONFIG_LIVEPATCH */' "$KALLSYMS_C"; then
+            sed -i '/^#ifdef CONFIG_LIVEPATCH$/,/^int kallsyms_on_each_symbol/ { /^#ifdef CONFIG_LIVEPATCH$/d }' "$KALLSYMS_C"
+            sed -i '/^int kallsyms_on_each_symbol/,/^#endif \/\* CONFIG_LIVEPATCH \*\// { /^#endif \/\* CONFIG_LIVEPATCH \*\//d }' "$KALLSYMS_C"
+            echo "✅ Fixed kallsyms_on_each_symbol LIVEPATCH linker issue"
+          fi
+        fi
+
+    - name: Apply Stock Config Spoofing
+      shell: bash
+      if: ${{ inputs.feature_susfs == 'true' }}
+      run: |
+        set -euo pipefail
+        echo "::group::Apply Stock Config Spoofing"
+        STOCK_SRC="$WORKSPACE/config/stock_defconfig"
+        STOCK_DST="$GKI_ROOT/common/arch/arm64/configs/stock_defconfig"
+        TARGET_MAKEFILE="$GKI_ROOT/common/kernel/Makefile"
+        
+        if [ -f "$STOCK_SRC" ]; then
+          mkdir -p "$(dirname "$STOCK_DST")"
+          cp "$STOCK_SRC" "$STOCK_DST"
+          echo "Copied custom stock_defconfig to $STOCK_DST"
+          SPOOF_TARGET="arch/arm64/configs/stock_defconfig"
+        else
+          echo "No custom $STOCK_SRC found, falling back to in-tree gki_defconfig for spoofing."
+          SPOOF_TARGET="arch/arm64/configs/gki_defconfig"
+        fi
+        
+        NEW_RULE="\$(obj)/config_data: $SPOOF_TARGET FORCE"
+        OLD_RULE='\$(obj)/config_data: \$(KCONFIG_CONFIG) FORCE'
+        
+        if [ -f "$TARGET_MAKEFILE" ]; then
+          # Check if it already uses the spoof target
+          if grep -qF "$NEW_RULE" "$TARGET_MAKEFILE"; then
+            echo "config_data already uses $SPOOF_TARGET."
+          # Check if we need to replace the original rule
+          elif grep -qF '$(obj)/config_data: $(KCONFIG_CONFIG) FORCE' "$TARGET_MAKEFILE"; then
+            sed -i "s|\$(obj)/config_data: \$(KCONFIG_CONFIG) FORCE|$NEW_RULE|" "$TARGET_MAKEFILE"
+            echo "✅ Spoofed /proc/config.gz via $TARGET_MAKEFILE using $SPOOF_TARGET"
+          fi
+        fi
+        echo "::endgroup::"
 
     - name: Compile Kernel
       shell: bash
