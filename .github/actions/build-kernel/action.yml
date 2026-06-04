@@ -222,6 +222,14 @@ runs:
         cd "$GKI_ROOT"
 
         # Apply KSU integration patch based on version
+        # Handle KernelSU Makefile -> Kbuild compatibility safely
+        KSU_DIR="KernelSU"
+        if [ "${{ inputs.ksu_type }}" = "KSUN" ]; then KSU_DIR="KurisuNext"; fi
+        
+        if [ -f "common/$KSU_DIR/kernel/Kbuild" ]; then
+          sed -i 's|kernel/Makefile|kernel/Kbuild|g' "$SUSFS_DIR/kernel_patches/KernelSU/10_enable_susfs_for_ksu.patch" || true
+        fi
+        
         case "$susfs_version" in
           "v1.5.8")
             if [ "${{ inputs.ksu_type }}" = "KSUN" ]; then
@@ -314,12 +322,46 @@ runs:
           fi
         fi
         if [ "$ANDROID_VER" = "android12" ] && [ "$VERSION_MAJOR" = "5.10" ]; then
+          if [ "${SUBLEVEL:-999}" -le 43 ]; then
+            echo "Temporarily adjust Android 12 5.10 base.c context"
+            perl -i -pe 's/(int|size_t)\s+this_len\s*=\s*min_t\s*\(\s*\1\s*,/size_t this_len = min_t(size_t,/;' fs/proc/base.c || true
+            fake_patched=1
+          fi
+          if [ "${SUBLEVEL:-999}" -le 117 ]; then
+            echo "Temporarily adjust Android 12 5.10 fdinfo.c mask"
+            sed -i '/^[[:space:]]*\/\*$/,/^[[:space:]]*u32 mask = mark->mask & IN_ALL_EVENTS;$/d' fs/notify/fdinfo.c || true
+            perl -i -pe 's/\bmask,\s*mark->ignored_mask/inotify_mark_user_mask(mark)/g' fs/notify/fdinfo.c || true
+            perl -i -pe 's/ignored_mask:%x/ignored_mask:0/g' fs/notify/fdinfo.c || true
+            fake_patched=1
+          fi
           if ! grep -qxF $'\tif (!vma_pages(vma))' ./fs/proc/task_mmu.c; then
             echo "vma_pages Line not found. Fake Patching!"
             fake_patched=1
           fi
         fi
+        if [ "$ANDROID_VER" = "android13" ] && [ "$VERSION_MAJOR" = "5.10" ]; then
+          if [ "${SUBLEVEL:-999}" -le 107 ]; then
+            echo "Temporarily adjust Android 13 5.10 fdinfo.c mask"
+            sed -i '/^[[:space:]]*\/\*$/,/^[[:space:]]*u32 mask = mark->mask & IN_ALL_EVENTS;$/d' fs/notify/fdinfo.c || true
+            perl -i -pe 's/\bmask,\s*mark->ignored_mask/inotify_mark_user_mask(mark)/g' fs/notify/fdinfo.c || true
+            perl -i -pe 's/ignored_mask:%x/ignored_mask:0/g' fs/notify/fdinfo.c || true
+            fake_patched=1
+          fi
+        fi
         if [ "$ANDROID_VER" = "android13" ] && [ "$VERSION_MAJOR" = "5.15" ]; then
+          if [ "${SUBLEVEL:-999}" -le 41 ]; then
+            echo "Temporarily adjust Android 13 5.15 namespace.c/open.c/fdinfo.c context"
+            if ! grep -qF '#include <linux/mnt_idmapping.h>' fs/namespace.c; then
+              sed -i '/^#include <linux\/shmem_fs.h>$/a #include <linux/mnt_idmapping.h>' fs/namespace.c || true
+            fi
+            if ! grep -qF '#include <linux/mnt_idmapping.h>' fs/open.c; then
+              sed -i '/^#include <linux\/compat.h>$/a #include <linux/mnt_idmapping.h>' fs/open.c || true
+            fi
+            sed -i '/^[[:space:]]*\/\*$/,/^[[:space:]]*u32 mask = mark->mask & IN_ALL_EVENTS;$/d' fs/notify/fdinfo.c || true
+            perl -i -pe 's/\bmask,\s*mark->ignored_mask/inotify_mark_user_mask(mark)/g' fs/notify/fdinfo.c || true
+            perl -i -pe 's/ignored_mask:%x/ignored_mask:0/g' fs/notify/fdinfo.c || true
+            fake_patched=1
+          fi
           if ! grep -qxF $'\tif (!vma_pages(vma))' ./fs/proc/task_mmu.c; then
             echo "vma_pages Line not found. Fake Patching!"
             fake_patched=1
@@ -333,6 +375,16 @@ runs:
         fi
         
         if [ "$ANDROID_VER" = "android14" ] && [ "$VERSION_MAJOR" = "6.1" ]; then
+          if [ "${SUBLEVEL:-999}" -le 25 ] && ! grep -qF '#include <trace/hooks/sched.h>' fs/proc/base.c; then
+            echo "Temporarily adjust Android 14 6.1 sched.h context"
+            sed -i '/^#include <trace\/events\/oom.h>$/a #include <trace/hooks/sched.h>' fs/proc/base.c || true
+            fake_patched=1
+          fi
+          if [ "${SUBLEVEL:-999}" -ge 157 ]; then
+            echo "Temporarily adjust Android 14 6.1 namespace.c context"
+            sed -i '/^#include <trace\/hooks\/blk.h>$/d' fs/namespace.c || true
+            fake_patched=1
+          fi
           if ! grep -qxF $'\tif (!vma_pages(vma))' ./fs/proc/task_mmu.c; then
             echo "vma_pages Line not found. Fake Patching!"
             fake_patched=1
@@ -341,6 +393,14 @@ runs:
           if ! grep -qxF '#include <linux/dma-buf.h>' ./fs/proc/base.c; then
             echo "#include <linux/dma-buf.h> Line not found. Adding missing header"
             sed -i '/#include <linux\/cpufreq_times.h>/a #include <linux\/dma-buf.h>' ./fs/proc/base.c
+          fi
+        fi
+        
+        if [ "$ANDROID_VER" = "android16" ] && [ "$VERSION_MAJOR" = "6.12" ]; then
+          if [ "${SUBLEVEL:-999}" -ge 58 ]; then
+             echo "Temporarily removing dma-buf.h from exec.c for Android 16"
+             sed -i '/^#include <linux\/dma-buf.h>$/d' fs/exec.c || true
+             fake_patched=1
           fi
         fi
         
@@ -381,11 +441,87 @@ runs:
             fi
           fi
           if [ "$ANDROID_VER" = "android14" ] && [ "$VERSION_MAJOR" = "6.1" ]; then
+            if [ "${SUBLEVEL:-999}" -le 25 ]; then
+              sed -i '/^#include <trace\/hooks\/sched.h>$/d' fs/proc/base.c || true
+            fi
+            if [ "${SUBLEVEL:-999}" -ge 157 ] && ! grep -qF '#include <trace/hooks/blk.h>' fs/namespace.c; then
+              echo "Revert Android 14 6.1 namespace.c temporary adjust"
+              sed -i '/^#include "internal.h"$/a #include <trace/hooks/blk.h>' fs/namespace.c || true
+            fi
             if grep -qxF $'\t\t\tgoto show_pad;' ./fs/proc/task_mmu.c; then
               echo "vma_pages Line found. Revert Fake Patching!"
               sed -i -e 's/goto show_pad;/return 0;/' ./fs/proc/task_mmu.c
             fi
           fi
+          if [ "$ANDROID_VER" = "android12" ] && [ "$VERSION_MAJOR" = "5.10" ]; then
+            if [ "${SUBLEVEL:-999}" -le 43 ]; then
+              echo "Revert Android 12 5.10 base.c temporary adjust"
+              sed -i 's/^size_t this_len = min_t(size_t, count, PAGE_SIZE);$/int this_len = min_t(int, count, PAGE_SIZE);/' fs/proc/base.c || true
+            fi
+            if [ "${SUBLEVEL:-999}" -le 117 ]; then
+              echo "Revert Android 12 5.10 fdinfo.c temporary adjust"
+              perl -i -pe 's/^(\s+if \(inode\) \{)/$1\n\t\t\/\*\n\t\t * IN_ALL_EVENTS represents all of the mask bits\n\t\t * that we expose to userspace.  There is at\n\t\t * least one bit (FS_EVENT_ON_CHILD) which is\n\t\t * used only internally to the kernel.\n\t\t *\/\n\t\tu32 mask = mark->mask & IN_ALL_EVENTS;/m' fs/notify/fdinfo.c || true
+              perl -i -pe 's/\binotify_mark_user_mask\(mark\)/mask, mark->ignored_mask/g' fs/notify/fdinfo.c || true
+              perl -i -pe 's/ignored_mask:0/ignored_mask:%x/g' fs/notify/fdinfo.c || true
+            fi
+          fi
+          if [ "$ANDROID_VER" = "android13" ] && [ "$VERSION_MAJOR" = "5.10" ]; then
+            if [ "${SUBLEVEL:-999}" -le 107 ]; then
+              echo "Revert Android 13 5.10 fdinfo.c temporary adjust"
+              perl -i -pe 's/^(\s+if \(inode\) \{)/$1\n\t\t\/\*\n\t\t * IN_ALL_EVENTS represents all of the mask bits\n\t\t * that we expose to userspace.  There is at\n\t\t * least one bit (FS_EVENT_ON_CHILD) which is\n\t\t * used only internally to the kernel.\n\t\t *\/\n\t\tu32 mask = mark->mask & IN_ALL_EVENTS;/m' fs/notify/fdinfo.c || true
+              perl -i -pe 's/\binotify_mark_user_mask\(mark\)/mask, mark->ignored_mask/g' fs/notify/fdinfo.c || true
+              perl -i -pe 's/ignored_mask:0/ignored_mask:%x/g' fs/notify/fdinfo.c || true
+            fi
+          fi
+          if [ "$ANDROID_VER" = "android13" ] && [ "$VERSION_MAJOR" = "5.15" ]; then
+            if [ "${SUBLEVEL:-999}" -le 41 ]; then
+              echo "Revert Android 13 5.15 temporary adjust"
+              sed -i '/#include <linux\/mnt_idmapping.h>$/d' fs/namespace.c || true
+              sed -i '/#include <linux\/mnt_idmapping.h>$/d' fs/open.c || true
+              perl -i -pe 's/^(\s+if \(inode\) \{)/$1\n\t\t\/\*\n\t\t * IN_ALL_EVENTS represents all of the mask bits\n\t\t * that we expose to userspace.  There is at\n\t\t * least one bit (FS_EVENT_ON_CHILD) which is\n\t\t * used only internally to the kernel.\n\t\t *\/\n\t\tu32 mask = mark->mask & IN_ALL_EVENTS;/m' fs/notify/fdinfo.c || true
+              perl -i -pe 's/\binotify_mark_user_mask\(mark\)/mask, mark->ignored_mask/g' fs/notify/fdinfo.c || true
+              perl -i -pe 's/ignored_mask:0/ignored_mask:%x/g' fs/notify/fdinfo.c || true
+              sed -i 's|i_uid_into_mnt(i_user_ns(&fi->inode), &fi->inode).val|i_uid_into_mnt(\&init_user_ns, \&fi->inode).val|g' fs/susfs.c || true
+              sed -i 's|i_uid_into_mnt(i_user_ns(inode), inode).val|i_uid_into_mnt(\&init_user_ns, inode).val|g' fs/susfs.c || true
+            fi
+          fi
+          if [ "$ANDROID_VER" = "android16" ] && [ "$VERSION_MAJOR" = "6.12" ]; then
+            if [ "${SUBLEVEL:-999}" -ge 58 ] && ! grep -qF '#include <linux/dma-buf.h>' fs/exec.c; then
+              echo "Revert Android 16 6.12 exec.c temporary adjust"
+              sed -i '0,/^#include /s//#include <linux\/dma-buf.h>\n&/' fs/exec.c || true
+            fi
+          fi
+        fi
+        
+        # --- POST-PATCH HEADER VALIDATION ---
+        echo "Validating SUSFS headers..."
+        if grep -q 'SUSFS_IS_INODE_SUS_MAP\|SUSFS_IS_INODE_OPEN_REDIRECT' ./fs/proc/task_mmu.c && ! grep -qF 'susfs_def.h' ./fs/proc/task_mmu.c; then
+          echo "Injecting missing susfs_def.h into task_mmu.c"
+          sed -i '0,/^#include /s//#if defined(CONFIG_KSU_SUSFS_SUS_KSTAT) || defined(CONFIG_KSU_SUSFS_SUS_MAP) || defined(CONFIG_KSU_SUSFS_OPEN_REDIRECT)\n#include <linux\/susfs_def.h>\n#endif\n&/' ./fs/proc/task_mmu.c || true
+        fi
+        if grep -q 'susfs_is_current_proc_umounted\|SUSFS_IS_INODE_SUS_MAP\|SUSFS_IS_INODE_OPEN_REDIRECT' ./fs/proc/base.c && ! grep -qF 'susfs_def.h' ./fs/proc/base.c; then
+          echo "Injecting missing susfs_def.h into base.c"
+          sed -i '0,/^#include /s//#if defined(CONFIG_KSU_SUSFS_SUS_MAP) || defined(CONFIG_KSU_SUSFS_OPEN_REDIRECT)\n#include <linux\/susfs_def.h>\n#endif\n&/' ./fs/proc/base.c || true
+        fi
+        if grep -q 'DEFAULT_KSU_MNT_ID\|susfs_mnt_id_ida' ./fs/namespace.c && ! grep -qF 'susfs_def.h' ./fs/namespace.c; then
+          echo "Injecting missing susfs_def.h into namespace.c"
+          sed -i '0,/^#include /s//#ifdef CONFIG_KSU_SUSFS_SUS_MOUNT\n#include <linux\/susfs_def.h>\n#endif\n&/' ./fs/namespace.c || true
+          if ! grep -q 'extern bool susfs_is_current_ksu_domain' ./fs/namespace.c; then
+            sed -i '/#include "internal.h"/a \\n#ifdef CONFIG_KSU_SUSFS_SUS_MOUNT\nextern bool susfs_is_current_ksu_domain(void);\nextern struct static_key_true susfs_is_sdcard_android_data_not_decrypted;\n#define CL_COPY_MNT_NS BIT(25)\n#endif' ./fs/namespace.c || true
+          fi
+        fi
+        if [ "$ANDROID_VER" = "android16" ] && [ "$VERSION_MAJOR" = "6.12" ]; then
+          if grep -q 'susfs_is_current_proc_umounted' ./fs/exec.c && ! grep -qF 'susfs_def.h' ./fs/exec.c; then
+            echo "Injecting missing susfs_def.h into exec.c"
+            sed -i '0,/^#include /s//#ifdef CONFIG_KSU_SUSFS\n#include <linux\/susfs_def.h>\n#endif\n&/' ./fs/exec.c || true
+          fi
+          
+          # Fix setuid_hook.c duplicate definition issue for KernelSU/KurisuNext
+          for hook_file in drivers/kernelsu/setuid_hook.c KernelSU/kernel/setuid_hook.c KurisuNext/kernel/setuid_hook.c drivers/kurisunext/setuid_hook.c; do
+            if [ -f "$hook_file" ]; then
+              sed -i 's/defined(CONFIG_KSU_MANUAL_HOOK))/!defined(CONFIG_KSU_SUSFS) \&\& defined(CONFIG_KSU_MANUAL_HOOK))/' "$hook_file" || true
+            fi
+          done
         fi
         
         # Add SUSFS configs (v2.0.0+ only)
