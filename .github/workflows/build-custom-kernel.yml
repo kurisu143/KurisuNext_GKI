@@ -137,17 +137,6 @@ jobs:
   build:
     runs-on: ubuntu-latest
     steps:
-      - name: Free Disk Space
-        uses: jlumbroso/free-disk-space@main
-        with:
-          tool-cache: true
-          android: true
-          dotnet: true
-          haskell: true
-          large-packages: true
-          docker-images: true
-          swap-storage: true
-          
       - name: 📥 Checkout Code
         uses: actions/checkout@v4
         
@@ -158,15 +147,6 @@ jobs:
         run: |
           set -euo pipefail
           echo "::group::Install dependencies"
-          echo "Waiting for dpkg lock..."
-          for i in $(seq 1 30); do
-            if sudo fuser /var/lib/dpkg/lock-frontend >/dev/null 2>&1; then
-              echo "  Lock held, waiting... ($i/30)"
-              sleep 2
-            else
-              break
-            fi
-          done
           sudo apt-get -o Acquire::Retries=3 update -qq
           sudo DEBIAN_FRONTEND=noninteractive apt-get install -y --no-install-recommends \
             git curl ca-certificates build-essential clang lld flex bison \
